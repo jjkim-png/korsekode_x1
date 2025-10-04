@@ -1,2 +1,513 @@
-# korsekode_x1
-the korsekode x1 version for tour pros
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Khronicle — The Klub 22</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+<style>
+:root{
+  --brand:#f15922; --bg:#f7f7fb; --card:#fff; --ink:#111; --muted:#6b7280;
+  --border:#e6e8ef; --shadow:0 10px 26px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",Helvetica,Arial,sans-serif}
+.wrap{max-width:1300px;margin:0 auto;padding:16px}
+.toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;
+  background:var(--card);border:1px solid var(--border);border-radius:16px;padding:10px 12px;box-shadow:var(--shadow)}
+.toolbar .left,.toolbar .right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border-radius:999px;background:#eef1f7}
+.muted{color:var(--muted)}
+.btn{cursor:pointer;border:1px solid var(--border);background:#fff;padding:8px 12px;border-radius:10px}
+.btn.brand{background:var(--brand);border-color:var(--brand);color:#fff}
+.grid{display:grid;gap:16px;margin-top:16px}
+.grid.two{grid-template-columns:1.2fr 1fr}
+.grid.three{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:1000px){.grid.two,.grid.three{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:14px;box-shadow:var(--shadow)}
+.section-title{font-weight:800;font-size:18px;margin:4px 0 10px}
+input[type="file"]{display:none}
+.file-label{border:1px dashed var(--border);padding:10px 12px;border-radius:12px;background:#fafbff;cursor:pointer}
+textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:12px;padding:10px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;background:#eee;font-size:12px}
+canvas{width:100%!important;height:360px!important}
+.footer{text-align:center;color:#999;font-size:12px;padding:22px 0}
+.ok{color:#0a7d28}.bad{color:#b00020}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- 상단 툴바 -->
+  <div class="toolbar">
+    <div class="left">
+      <span class="pill"><b>khronicle</b> <span id="schemaBadge" class="muted">schema: –</span></span>
+      <button class="btn" onclick="tryAutoload()">localStorage</button>
+      <button class="btn" onclick="parseUrlHash()">URL 해시</button>
+      <label class="file-label">라운드 JSON 불러오기
+        <input id="fileInputData" type="file" accept=".json,application/json"/>
+      </label>
+      <label class="file-label">앵커 v2(JSON) 불러오기
+        <input id="fileInputAnchor" type="file" accept=".json,application/json"/>
+      </label>
+    </div>
+    <div class="right">
+      <button class="btn" onclick="downloadCurrent()">현재 데이터 저장</button>
+      <span id="anchorBadge" class="pill muted">앵커: 기본(내장)</span>
+    </div>
+  </div>
+
+  <!-- 데이터 붙여넣기 / 앵커 붙여넣기 -->
+  <div class="grid two">
+    <div class="card">
+      <div class="section-title">라운드 데이터 붙여넣기</div>
+      <p class="muted">Korsekode에서 복사한 JSON을 붙여넣고 “적용”을 누르세요.</p>
+      <textarea id="pasteArea" placeholder='{"schema_version":"kdk-1.0.0","rounds":[...],"shots":[...]}'></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn brand" onclick="applyPasted()">적용</button>
+        <span id="validBadge" class="pill muted">유효성: 미확인</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">앵커 v2 붙여넣기(선택)</div>
+      <p class="muted">퍼팅 1–100ft, 그린외 5–250yd(1yd 해상도) 테이블 JSON을 붙여넣고 “적용”을 누르세요. 브라우저에 캐시됩니다.</p>
+      <textarea id="pasteAnchor" placeholder='{"schema":"expected-v2","putt_ft":[...100개...],"off_yd":{"FW":[...],"RF":[...],"BK":[...],"TR":[...],"HZ":[...]}}'></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn" onclick="applyAnchorPasted()">앵커 적용</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 요약 / 핵심 KPI -->
+  <div class="grid three">
+    <div class="card">
+      <div class="section-title">요약</div>
+      <div id="summary"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">라운드별 SG 합계</div>
+      <canvas id="sgChart"></canvas>
+    </div>
+    <div class="card">
+      <div class="section-title">SG 구성(OTT/APP/ARG/PUTT)</div>
+      <canvas id="sgStack"></canvas>
+    </div>
+  </div>
+
+  <!-- 정확도/기술 지표 -->
+  <div class="grid three">
+    <div class="card">
+      <div class="section-title">FIR / GIR</div>
+      <canvas id="firGirChart"></canvas>
+    </div>
+    <div class="card">
+      <div class="section-title">Up & Down / Sand Save</div>
+      <canvas id="udChart"></canvas>
+    </div>
+    <div class="card">
+      <div class="section-title">퍼팅(1펏·3펏률 / 평균 퍼트)</div>
+      <canvas id="puttChart"></canvas>
+    </div>
+  </div>
+
+  <!-- 분포 / 벌타 / 클럽 사용 -->
+  <div class="grid three">
+    <div class="card">
+      <div class="section-title">어프로치/세컨드 분포(좌표 기반 우선)</div>
+      <canvas id="scatterChart"></canvas>
+      <p class="muted" style="margin-top:6px;">좌표가 없으면 의사 분포로 표시됩니다. 입력: <code>shots[].coord.x_rel_m,y_rel_m</code> 또는 <code>landing_bearing_deg + landing_to_pin_m</code></p>
+    </div>
+    <div class="card">
+      <div class="section-title">벌타(라운드별)</div>
+      <canvas id="penaltyChart"></canvas>
+    </div>
+    <div class="card">
+      <div class="section-title">클럽 사용 빈도</div>
+      <canvas id="clubChart"></canvas>
+    </div>
+  </div>
+
+  <!-- 라운드/홀 테이블 -->
+  <div class="grid">
+    <div class="card">
+      <div class="section-title">스코어카드 & 홀별 요약</div>
+      <div id="roundTable"></div>
+    </div>
+  </div>
+
+  <div class="footer">© The Klub 22 • Khronicle</div>
+</div>
+
+<script>
+// ===== 전역 상태 =====
+let APP = { raw:null, rounds:[], shots:[], charts:{}, anchor:null };
+
+// ===== 앵커 v2 =====
+const BUILTIN_ANCHOR = {
+  schema:"builtin-toy",
+  putt_ft: Array.from({length:100}, (_,i)=> Math.max(1, Math.min(3, 0.80*Math.log((i+1)+1) + 0.9 ))),
+  off_yd: {
+    "FW": Array.from({length:246},(_,k)=> 2.6 + 0.0025*(k+5)),
+    "RF": Array.from({length:246},(_,k)=> 2.75 + 0.0025*(k+5)),
+    "BK": Array.from({length:246},(_,k)=> 2.85 + 0.0027*(k+5)),
+    "TR": Array.from({length:246},(_,k)=> 2.9 + 0.0029*(k+5)),
+    "HZ": Array.from({length:246},(_,k)=> 3.0 + 0.0032*(k+5))
+  }
+};
+APP.anchor = loadAnchorFromCache() || BUILTIN_ANCHOR;
+function saveAnchorToCache(a){ try{ localStorage.setItem("kdk:expected_v2", JSON.stringify(a)); }catch(e){} }
+function loadAnchorFromCache(){
+  try{ const raw=localStorage.getItem("kdk:expected_v2"); if(!raw) return null;
+    const o=JSON.parse(raw); if(o && (o.schema==="expected-v2"||o.schema==="builtin-toy")) return o; return null;
+  }catch(e){ return null }
+}
+function applyAnchor(a){ APP.anchor = a||BUILTIN_ANCHOR;
+  document.getElementById('anchorBadge').textContent =
+    "앵커: " + (APP.anchor.schema==="expected-v2" ? "v2 적용" : "기본(내장)");
+}
+function applyAnchorPasted(){
+  const txt = document.getElementById('pasteAnchor').value.trim(); if(!txt) return;
+  try{ const obj=JSON.parse(txt); if(!obj.putt_ft||!obj.off_yd) throw new Error("필수 키 누락");
+    applyAnchor(obj); saveAnchorToCache(obj);
+  }catch(err){ alert("앵커 JSON 오류: "+err.message); }
+}
+document.getElementById('fileInputAnchor').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return; const r=new FileReader();
+  r.onload=()=>{ try{ const o=JSON.parse(r.result); applyAnchor(o); saveAnchorToCache(o);}catch(err){ alert("앵커 파일 오류: "+err.message); } };
+  r.readAsText(f);
+});
+
+// ===== 데이터 로딩 =====
+function tryAutoload(){
+  const raw = localStorage.getItem('kdk:lastExport');
+  if(!raw){ alert('localStorage에 kdk:lastExport 데이터가 없습니다.'); return; }
+  try { ingest(JSON.parse(raw), 'localStorage'); } catch(e){ alert('불러오기 실패: '+e.message); }
+}
+function parseUrlHash(){
+  const h=location.hash||''; const m=h.match(/data=(.+)$/);
+  if(!m){ alert('URL 해시에 data= 가 없습니다.'); return; }
+  try{ const json = LZString.decompressFromEncodedURIComponent(m[1]); ingest(JSON.parse(json||'{}'),'url-hash'); }
+  catch(e){ alert('해시 파싱 실패: '+e.message); }
+}
+document.getElementById('fileInputData').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return; const r=new FileReader();
+  r.onload=()=>{ try{ ingest(JSON.parse(r.result),'file'); }catch(err){ alert('JSON 파싱 실패: '+err.message); } };
+  r.readAsText(f);
+});
+function applyPasted(){
+  const txt=document.getElementById('pasteArea').value.trim(); if(!txt) return;
+  try{ ingest(JSON.parse(txt),'paste'); }catch(err){ alert('JSON 파싱 실패: '+err.message); }
+}
+function downloadCurrent(){
+  if(!APP.raw){ alert('저장할 데이터가 없습니다.'); return; }
+  const blob=new Blob([JSON.stringify(APP.raw,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download='khronicle_data.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+// ===== 유효성 & 적재 =====
+function validate(payload){
+  const badge=document.getElementById('validBadge');
+  document.getElementById('schemaBadge').textContent = 'schema: ' + (payload.schema_version||'unknown');
+  if(!Array.isArray(payload.rounds)) throw new Error('rounds 배열 누락');
+  if(!Array.isArray(payload.shots))  throw new Error('shots 배열 누락');
+  const req=['roundId','hole','sequence','phase','lie','on_green','penalty'];
+  for(const s of payload.shots.slice(0,5)) for(const k of req) if(!(k in s)) throw new Error('샷 필드 누락: '+k);
+  badge.textContent='유효성: OK'; badge.classList.remove('muted','bad'); badge.classList.add('ok');
+}
+function ingest(payload, source=''){
+  validate(payload);
+  APP.raw=payload; APP.rounds=payload.rounds||[]; APP.shots=payload.shots||[];
+  renderSummary(source); renderTables(); renderMetrics(); drawCharts();
+}
+
+// ===== 기대타수 계산 =====
+function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function interp1(arr, idx){
+  const i0=clamp(Math.floor(idx),0,arr.length-1), i1=clamp(i0+1,0,arr.length-1), t=clamp(idx-i0,0,1);
+  return lerp(arr[i0],arr[i1],t);
+}
+function mapLieKey(lieRaw){
+  const s=String(lieRaw||"").toUpperCase();
+  if(s.includes("BK")) return "BK"; if(s.includes("HZ")) return "HZ";
+  if(s.includes("TR")||s.includes("TREE")) return "TR";
+  if(s.includes("RF")||s.includes("R")||s.includes("FESCUE")) return "RF";
+  return "FW";
+}
+function expectedFromV2(distance_m, phase, lie, on_green){
+  const A=APP.anchor||BUILTIN_ANCHOR;
+  if(on_green || phase==='putt'){
+    const ft=clamp((distance_m||0)*3.28084, 1, 100); return interp1(A.putt_ft, ft-1);
+  } else {
+    const yd=clamp((distance_m||0)*1.09361, 5, 250);
+    const key=mapLieKey(lie); const tbl=A.off_yd[key]||A.off_yd.FW; return interp1(tbl, yd-5);
+  }
+}
+function expectedStrokes(distance_m, phase, lie, on_green){ return expectedFromV2(distance_m, phase, lie, on_green); }
+
+// ===== SG & 분류 =====
+function classifyShot(s){
+  const p=String(s.phase||'').toLowerCase();
+  if(p==='tee') return 'OTT';
+  if(p==='approach') return 'APP';
+  if(p==='around') return 'ARG';
+  if(p==='putt' || s.on_green) return 'PUTT';
+  return 'OTHER';
+}
+function sgPerShot(s, next){
+  const e0=expectedStrokes(s.remaining_m ?? s.distance_m, s.phase, s.lie, s.on_green);
+  let e1, advanced = !!next;
+  if(next){ e1=expectedStrokes(next.remaining_m ?? next.distance_m, next.phase, next.lie, next.on_green); }
+  else { e1=0; advanced=true; } // holed
+  const penalty=Number(s.penalty||0);
+  if(penalty>0 && !advanced) e1=e0; // 전진 없는 벌타 가정
+  return e0 - (1 + penalty + e1);
+}
+
+// ===== 그룹/집계 =====
+function groupByRound(shots){
+  const by=new Map();
+  for(const s of shots){ const k=s.roundId||'R?'; if(!by.has(k)) by.set(k,[]); by.get(k).push(s); }
+  for(const arr of by.values()){ arr.sort((a,b)=> (a.hole-b.hole)||(a.sequence-b.sequence)); }
+  return by;
+}
+function perRoundAgg(){
+  const by=groupByRound(APP.shots); const rows=[];
+  for(const [rid, arr] of by.entries()){
+    let sg=0, comp={OTT:0,APP:0,ARG:0,PUTT:0}, pen=0, putts=0, onePutts=0, threePutts=0;
+    let firHit=0, firCh=0, girHit=0, girCh=0, updownMake=0, updownCh=0, sandSave=0, sandCh=0;
+    let score=0; let lastHole=null; let strokesOnThisHole=0; let reachedGreenInReg=false;
+
+    for(let i=0;i<arr.length;i++){
+      const s=arr[i]; const next=(i<arr.length-1 && arr[i+1].hole===s.hole) ? arr[i+1] : null;
+      const c=classifyShot(s);
+      const val=sgPerShot(s,next); sg+=val; comp[c]+=val;
+      pen += Number(s.penalty||0);
+
+      // 퍼팅 통계
+      if(c==='PUTT'){ putts++; if(s.holed && strokesOnThisHole===0){} // no-op
+        // one/three-putt 추정 (같은 홀에서 putt 수 카운트 필요)
+      }
+
+      // FIR/GIR 기회/적중(간단 휴리스틱)
+      if(lastHole!==s.hole){ // 홀 시작
+        if(lastHole!==null){
+          // 이전 홀 퍼팅 수로 1펏/3펏 계산
+          const holePutts = arr.filter(x=>x.hole===lastHole && (classifyShot(x)==='PUTT')).length;
+          if(holePutts===1) onePutts++;
+          if(holePutts>=3) threePutts++;
+        }
+        lastHole=s.hole; strokesOnThisHole=0; reachedGreenInReg=false;
+        // FIR 기회: 파4/5 티샷 존재 시
+        const par = Array.isArray(APP.rounds[0]?.parArray) ? APP.rounds[0].parArray[s.hole-1] : null;
+        if(par && (par===4 || par===5)) firCh++;
+      }
+
+      // FIR 적중: 티샷이고 lie가 FW
+      if(c==='OTT' && String(s.lie||"").toUpperCase().includes("F")){ firHit++; }
+
+      // GIR 기회/적중
+      // 기회: 기본 18홀로 가정
+      girCh++;
+      if(s.on_green && !reachedGreenInReg){
+        // 라운드 메타의 parArray가 있으면 '규정타수 이내 그린'을 엄밀히 계산 가능.
+        reachedGreenInReg=true; girHit++;
+      }
+
+      // Up&Down / Sand Save
+      const isARG = (c==='ARG');
+      const isSand = String(s.lie||'').toUpperCase().includes('BK');
+      if(isARG){
+        updownCh++; if(isSand) sandCh++;
+        // “ARG 이후 2타 이내 홀아웃”을 성공으로 처리
+        const next2 = arr[i+2];
+        if(next && (next.holed || (next2 && next2.holed))){ updownMake++; if(isSand) sandSave++; }
+      }
+
+      score += 1 + Number(s.penalty||0);
+      if(!next) { // 홀 마감
+        // 마지막 홀 퍼팅 수 카운트
+        const holePutts = arr.filter(x=>x.hole===s.hole && (classifyShot(x)==='PUTT')).length;
+        if(holePutts===1) onePutts++;
+        if(holePutts>=3) threePutts++;
+      }
+      strokesOnThisHole++;
+    }
+
+    // 평균 퍼트(홀당)
+    const holes = new Set(arr.map(x=>x.hole)).size || 1;
+    const avgPutt = (arr.filter(x=>classifyShot(x)==='PUTT').length)/holes;
+
+    rows.push({
+      roundId: rid, sg:+sg.toFixed(3),
+      comp: { OTT:+comp.OTT.toFixed(3), APP:+comp.APP.toFixed(3), ARG:+comp.ARG.toFixed(3), PUTT:+comp.PUTT.toFixed(3) },
+      fir: { hit:firHit, ch:firCh }, gir:{ hit:girHit, ch:girCh },
+      updown:{ make:updownMake, ch:updownCh }, sand:{ make:sandSave, ch:sandCh },
+      putt:{ one:onePutts, three:threePutts, avg:+avgPutt.toFixed(2) },
+      penalties: pen
+    });
+  }
+  return rows;
+}
+
+// ===== 좌표 변환 =====
+function shotPoint(s,i){
+  if(s.coord && typeof s.coord.x_rel_m==="number" && typeof s.coord.y_rel_m==="number")
+    return {x:s.coord.x_rel_m,y:s.coord.y_rel_m};
+  if(typeof s.landing_bearing_deg==="number" && typeof s.landing_to_pin_m==="number"){
+    const rad=s.landing_bearing_deg*Math.PI/180, r=s.landing_to_pin_m;
+    return {x:r*Math.cos(rad), y:r*Math.sin(rad)};
+  }
+  const r=(s.landing_to_pin_m||0)/2;
+  return {x: Math.sin(i*12.9898)*50 + r, y: Math.cos(i*78.233)*50 + r};
+}
+
+// ===== UI =====
+function renderSummary(source){
+  const el=document.getElementById('summary');
+  const rounds=APP.rounds.length, shots=APP.shots.length;
+  el.innerHTML=`
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <span class="pill"><b>출처</b>: ${source||'—'}</span>
+      <span class="pill"><b>라운드</b>: ${rounds}</span>
+      <span class="pill"><b>샷</b>: ${shots}</span>
+      <span class="pill"><b>앵커</b>: ${(APP.anchor&&APP.anchor.schema==='expected-v2')?'v2 적용':'기본(내장)'}</span>
+    </div>
+    <div class="muted" style="margin-top:8px;">데이터/앵커는 브라우저에만 저장됩니다(localStorage).</div>
+  `;
+}
+
+function renderTables(){
+  const host=document.getElementById('roundTable'); host.innerHTML='';
+  const by = groupByRound(APP.shots);
+  for(const [rid, arr] of by.entries()){
+    const table=document.createElement('table');
+    const thead=`<tr>
+      <th>Round</th><th>Hole</th><th>Seq</th><th>Phase</th><th>Lie</th><th>OnG</th>
+      <th>Dist(m)</th><th>Remain(m)</th><th>ToPin(m)</th><th>Club</th><th>Penalty</th><th>Holed</th>
+    </tr>`;
+    const rows = arr.map(s=>`<tr>
+      <td>${rid}</td><td>${s.hole}</td><td>${s.sequence}</td><td>${s.phase}</td><td>${s.lie||''}</td>
+      <td>${s.on_green? 'Y':'-'}</td><td>${s.distance_m??''}</td><td>${s.remaining_m??''}</td>
+      <td>${s.landing_to_pin_m??''}</td><td>${s.club??''}</td><td>${s.penalty||0}</td><td>${s.holed?'Y':'-'}</td>
+    </tr>`).join('');
+    table.innerHTML = `<thead>${thead}</thead><tbody>${rows}</tbody>`;
+    const wrap=document.createElement('div'); wrap.style.marginBottom='16px';
+    wrap.innerHTML=`<div class="badge" style="margin-bottom:6px;">Round: ${rid}</div>`;
+    wrap.appendChild(table); host.appendChild(wrap);
+  }
+}
+
+function pct(a,b){ return (b>0)? +(100*a/b).toFixed(1) : 0; }
+
+function renderMetrics(){
+  // 상단 KPI 등 추가 필요 시 이곳 확장 가능
+}
+
+// ===== 차트 =====
+function drawCharts(){
+  const rows = perRoundAgg();
+  // SG 합계
+  const labels = rows.map(r=>r.roundId);
+  const sgData = rows.map(r=>r.sg);
+
+  APP.charts.sg && APP.charts.sg.destroy();
+  APP.charts.sg = new Chart(document.getElementById('sgChart').getContext('2d'), {
+    type:'bar',
+    data:{ labels, datasets:[{ label:'SG(합계)', data:sgData }] },
+    options:{ responsive:true, plugins:{ legend:{display:false} }, scales:{ y:{ beginAtZero:true } } }
+  });
+
+  // SG 구성
+  const dOTT=rows.map(r=>r.comp.OTT), dAPP=rows.map(r=>r.comp.APP), dARG=rows.map(r=>r.comp.ARG), dPUTT=rows.map(r=>r.comp.PUTT);
+  APP.charts.sgStack && APP.charts.sgStack.destroy();
+  APP.charts.sgStack = new Chart(document.getElementById('sgStack').getContext('2d'), {
+    type:'bar',
+    data:{ labels, datasets:[
+      {label:'OTT', data:dOTT, stack:'sg'},
+      {label:'APP', data:dAPP, stack:'sg'},
+      {label:'ARG', data:dARG, stack:'sg'},
+      {label:'PUTT',data:dPUTT,stack:'sg'}
+    ] },
+    options:{ responsive:true, plugins:{}, scales:{ y:{ beginAtZero:true } } }
+  });
+
+  // FIR/GIR
+  const firPct = rows.map(r=>pct(r.fir.hit, r.fir.ch));
+  const girPct = rows.map(r=>pct(r.gir.hit, r.gir.ch));
+  APP.charts.fg && APP.charts.fg.destroy();
+  APP.charts.fg = new Chart(document.getElementById('firGirChart').getContext('2d'), {
+    type:'line',
+    data:{ labels, datasets:[
+      {label:'FIR %', data:firPct},
+      {label:'GIR %', data:girPct}
+    ]},
+    options:{ responsive:true }
+  });
+
+  // Up&Down / Sand Save
+  const udPct = rows.map(r=>pct(r.updown.make, r.updown.ch));
+  const ssPct = rows.map(r=>pct(r.sand.make, r.sand.ch));
+  APP.charts.ud && APP.charts.ud.destroy();
+  APP.charts.ud = new Chart(document.getElementById('udChart').getContext('2d'), {
+    type:'bar',
+    data:{ labels, datasets:[
+      {label:'Up&Down %', data:udPct},
+      {label:'Sand Save %', data:ssPct}
+    ]},
+    options:{ responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } }
+  });
+
+  // 퍼팅
+  const oneP = rows.map(r=>r.putt.one);
+  const threeP = rows.map(r=>r.putt.three);
+  const avgP = rows.map(r=>r.putt.avg);
+  APP.charts.putt && APP.charts.putt.destroy();
+  APP.charts.putt = new Chart(document.getElementById('puttChart').getContext('2d'), {
+    type:'bar',
+    data:{ labels, datasets:[
+      {label:'1펏 수', data:oneP, yAxisID:'y'},
+      {label:'3펏 수', data:threeP, yAxisID:'y'},
+      {label:'평균 퍼트(홀당)', data:avgP, type:'line', yAxisID:'y1'}
+    ]},
+    options:{ responsive:true, scales:{ y:{ beginAtZero:true }, y1:{ position:'right', beginAtZero:true } } }
+  });
+
+  // 벌타
+  const pens = rows.map(r=>r.penalties);
+  APP.charts.pen && APP.charts.pen.destroy();
+  APP.charts.pen = new Chart(document.getElementById('penaltyChart').getContext('2d'), {
+    type:'bar', data:{ labels, datasets:[{label:'벌타 수', data:pens}] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true } } }
+  });
+
+  // 클럽 사용 빈도
+  const clubCount = {};
+  for(const s of APP.shots){ if(!s.club) continue; clubCount[s.club]=(clubCount[s.club]||0)+1; }
+  const clubLabels=Object.keys(clubCount); const clubVals=clubLabels.map(k=>clubCount[k]);
+  APP.charts.club && APP.charts.club.destroy();
+  APP.charts.club = new Chart(document.getElementById('clubChart').getContext('2d'), {
+    type:'bar', data:{ labels:clubLabels, datasets:[{label:'사용 횟수', data:clubVals}] }, options:{ responsive:true, plugins:{legend:{display:false}} }
+  });
+
+  // 좌표 분포
+  const approachShots = APP.shots.filter(s=>!s.on_green && String(s.phase||'').toLowerCase()!=='putt');
+  const pts = approachShots.slice(0, 2000).map((s,i)=> shotPoint(s,i));
+  APP.charts.scatter && APP.charts.scatter.destroy();
+  APP.charts.scatter = new Chart(document.getElementById('scatterChart').getContext('2d'), {
+    type:'scatter', data:{ datasets:[{ label:'Approach/Second', data:pts }] }, options:{ responsive:true, plugins:{legend:{display:false}} }
+  });
+}
+
+// ===== 부트스트랩 =====
+(function(){
+  if(new URLSearchParams(location.search).get('autoload')==='1'){ tryAutoload(); }
+  applyAnchor(APP.anchor);
+})();
+</script>
+</body>
+</html>
